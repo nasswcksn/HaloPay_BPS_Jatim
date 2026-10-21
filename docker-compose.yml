@@ -1,0 +1,84 @@
+services:
+  db:
+    container_name: halopay-db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - halopay_pgdata:/var/lib/postgresql/data
+      - ./backend/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - halopay-network
+
+  backend:
+    container_name: halopay-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: halopay-backend:latest
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      PROJECT_NAME: "HaloPay BPS Jatim Backend"
+      API_V1_STR: "/api/v1"
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      JWT_SECRET: ${JWT_SECRET}
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-https://auth.majapah.it}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-majapahit}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-halopay}
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000","http://localhost:3005","http://127.0.0.1:3005","http://frontend:3000"]'
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - halopay-network
+
+  frontend:
+    container_name: halopay-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: halopay-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      HOSTNAME: "0.0.0.0"
+      FASTAPI_INTERNAL_URL: "http://backend:8000"
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - halopay-network
+
+networks:
+  halopay-network:
+    name: halopay-network
+    driver: bridge
+
+volumes:
+  halopay_pgdata:
+    name: halopay_pgdata
