@@ -1,6 +1,6 @@
-import time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from backend.app.core.config import settings
 from backend.app.core.database import check_database_connection
 from backend.app.api import auth, payroll, admin
@@ -9,8 +9,9 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Dedicated Backend REST API untuk Sistem Pemantauan Pendapatan & TK Pegawai BPS Jatim (HaloPay) dengan jaminan Zero Data Leakage.",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.ENABLE_DOCS else None,
+    redoc_url="/redoc" if settings.ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if settings.ENABLE_DOCS else None,
 )
 
 # Konfigurasi CORS
@@ -23,8 +24,6 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-START_TIME = time.time()
-
 # Daftarkan Router API v1
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(payroll.router, prefix=settings.API_V1_STR)
@@ -32,33 +31,15 @@ app.include_router(admin.router, prefix=settings.API_V1_STR)
 
 @app.get("/", tags=["Root"])
 async def root():
-    return {
-        "app": settings.PROJECT_NAME,
-        "version": "1.0.0",
-        "status": "online",
-        "docs_url": "/docs",
-        "timestamp": time.time(),
-    }
+    return {"app": settings.PROJECT_NAME, "status": "online"}
 
-@app.get("/api/health", tags=["Health"])
-@app.get("/api/v1/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"], include_in_schema=False)
 async def health_check():
     """
-    Endpoint pemantauan kesehatan sistem dan uji latensi basis data.
+    Healthcheck internal kontainer Docker. Berada di luar /api/v1 sehingga tidak diteruskan
+    oleh proxy frontend, dan hanya mengembalikan status tanpa detail infrastruktur.
     """
-    uptime_seconds = round(time.time() - START_TIME, 2)
     db_status = await check_database_connection()
-    
-    is_healthy = db_status.get("connected", False)
-    
-    return {
-        "status": "healthy" if is_healthy else "degraded",
-        "app": settings.PROJECT_NAME,
-        "uptime_seconds": uptime_seconds,
-        "database": db_status,
-        "keycloak": {
-            "url": settings.KEYCLOAK_URL,
-            "realm": settings.KEYCLOAK_REALM,
-            "client_id": settings.KEYCLOAK_CLIENT_ID,
-        },
-    }
+    if db_status.get("connected", False):
+        return {"status": "healthy"}
+    return JSONResponse(status_code=503, content={"status": "degraded"})

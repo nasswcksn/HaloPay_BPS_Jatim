@@ -1,26 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { decodeJwt } from 'jose';
-
-
-const SESSION_COOKIE_NAME = 'bps_payroll_session';
-
-function getBaseUrl(request: NextRequest): string {
-  let clientHost = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
-  if (clientHost.startsWith('0.0.0.0')) {
-    clientHost = clientHost.replace('0.0.0.0', 'localhost');
-  }
-  const forwardedProto = request.headers.get('x-forwarded-proto');
-  let envProto: string | null = null;
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    envProto = process.env.NEXT_PUBLIC_APP_URL.startsWith('https') ? 'https' : 'http';
-  }
-  const protocol = forwardedProto || envProto || (request.nextUrl.protocol ? request.nextUrl.protocol.replace(':', '') : 'http');
-  return `${protocol}://${clientHost}`;
-}
+import { getAppUrl } from '@/utils/app-url';
+import { SESSION_COOKIE_NAME, verifySessionToken } from '@/utils/session';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const baseUrl = getBaseUrl(request);
+  const baseUrl = getAppUrl();
 
   // Lewati file statis dan API internal
   if (
@@ -31,21 +15,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  let session: any = null;
-
-  if (token) {
-    try {
-      const payload = decodeJwt(token);
-      if (payload.exp && Date.now() >= payload.exp * 1000) {
-        session = null;
-      } else {
-        session = payload;
-      }
-    } catch {
-      session = null;
-    }
-  }
+  // Sesi diverifikasi ke backend; cookie palsu, kedaluwarsa, atau milik akun yang sudah
+  // dihapus dianggap tidak ada (juga mencegah loop redirect /login <-> /dashboard).
+  const session = await verifySessionToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
 
   // Jika di root ('/')
   if (pathname === '/') {

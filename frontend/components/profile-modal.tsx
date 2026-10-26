@@ -1,6 +1,6 @@
 'use client';
 
-import { X, ShieldCheck, User, ExternalLink, Lock } from 'lucide-react';
+import { X, ShieldCheck, User, Lock } from 'lucide-react';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -99,17 +99,7 @@ export default function ProfileModal({ isOpen, onClose, user }: ProfileModalProp
           </div>
 
           {/* Tindakan */}
-          <div className="pt-2 flex items-center justify-between gap-2.5">
-            <a
-              href="https://auth.majapah.it/realms/majapahit/account"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-sky-900 bg-sky-100/70 hover:bg-sky-200/70 rounded-xl transition"
-            >
-              <span>Portal Akun Majapahit</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-
+          <div className="pt-2 flex items-center justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}

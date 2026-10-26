@@ -78,7 +78,7 @@ async def test_sync_session_rejects_forged_token(mock_keycloak_jwks):
     with pytest.raises(HTTPException) as exc_info:
         await sync_session(payload_forged)
     assert exc_info.value.status_code == 401
-    assert "Signature verification failed" in exc_info.value.detail
+    assert exc_info.value.detail == "Verifikasi tanda tangan digital token Keycloak gagal."
 
 @pytest.mark.anyio
 async def test_sync_session_rejects_expired_token(mock_keycloak_jwks):
@@ -168,3 +168,38 @@ async def test_sync_session_handles_at_hash_claim(mock_keycloak_jwks):
         res = await sync_session(payload)
         assert res.nip == "196807031994011001"
         assert res.role == "karyawan"
+
+@pytest.mark.anyio
+async def test_sync_session_ignores_preferred_username_as_nip(mock_keycloak_jwks):
+    """
+    Token tanpa klaim NIP resmi DITOLAK walaupun preferred_username berisi NIP pegawai lain,
+    karena preferred_username dapat diubah oleh pengguna.
+    """
+    claims = {
+        "iss": "https://auth.majapah.it/realms/majapahit",
+        "aud": "halopay",
+        "azp": "halopay",
+        "preferred_username": "198503142009022003",
+        "exp": time.time() + 3600,
+        "iat": time.time(),
+    }
+    token = jwt.encode(claims, keycloak_priv_pem, algorithm="RS256", headers={"kid": "keycloak-official-key-1"})
+    with pytest.raises(HTTPException) as exc_info:
+        await sync_session(SyncSessionPayload(id_token=token))
+    assert exc_info.value.status_code == 400
+
+@pytest.mark.anyio
+async def test_sync_session_rejects_malformed_nip(mock_keycloak_jwks):
+    """Klaim NIP yang bukan 18 digit angka DITOLAK."""
+    claims = {
+        "iss": "https://auth.majapah.it/realms/majapahit",
+        "aud": "halopay",
+        "azp": "halopay",
+        "nip_baru": "1985' OR '1'='1",
+        "exp": time.time() + 3600,
+        "iat": time.time(),
+    }
+    token = jwt.encode(claims, keycloak_priv_pem, algorithm="RS256", headers={"kid": "keycloak-official-key-1"})
+    with pytest.raises(HTTPException) as exc_info:
+        await sync_session(SyncSessionPayload(id_token=token))
+    assert exc_info.value.status_code == 400

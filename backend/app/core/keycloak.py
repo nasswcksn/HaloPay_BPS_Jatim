@@ -1,9 +1,10 @@
+import re
 import time
 import logging
 from typing import Dict, Any, Optional
 import httpx
 from fastapi import HTTPException, status
-from jose import jwt, jwk, JWTError
+from jose import jwt, jwk, JWTError, ExpiredSignatureError
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ async def verify_keycloak_jwt(token: str, access_token: Optional[str] = None) ->
     if not key_dict:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Kunci publik untuk token (kid: {kid}) tidak terdaftar pada Keycloak server."
+            detail="Verifikasi tanda tangan digital token Keycloak gagal."
         )
 
     try:
@@ -128,19 +129,26 @@ async def verify_keycloak_jwt(token: str, access_token: Optional[str] = None) ->
                 "leeway": 60,
             }
         )
+    except ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token Keycloak telah kedaluwarsa (expired). Silakan login kembali."
+        )
     except JWTError as exc:
+        # Detail teknis hanya dicatat di log server, tidak dikirim ke klien
         logger.warning(f"Verifikasi kriptografis token Keycloak gagal: {exc}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Verifikasi tanda tangan digital token Keycloak gagal: {str(exc)}"
+            detail="Verifikasi tanda tangan digital token Keycloak gagal."
         )
 
     # 1. Validasi Issuer (iss)
     token_iss = str(payload.get("iss", "")).rstrip("/")
     if token_iss != expected_issuer.rstrip("/"):
+        logger.warning(f"Issuer token tidak sesuai. Diharapkan: {expected_issuer}, Diterima: {token_iss}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Issuer token tidak sesuai. Diharapkan: {expected_issuer}, Diterima: {token_iss}"
+            detail="Issuer token Keycloak tidak sesuai."
         )
 
     # 2. Validasi Audience (aud) atau Authorized Party (azp)
@@ -160,7 +168,7 @@ async def verify_keycloak_jwt(token: str, access_token: Optional[str] = None) ->
     if not aud_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Audience/Client token tidak sah untuk aplikasi ini (Client ID: {target_client})."
+            detail="Audience/Client token tidak sah untuk aplikasi ini."
         )
 
     return payload
@@ -184,6 +192,18 @@ async def fetch_keycloak_userinfo(access_token: str) -> Dict[str, Any]:
     except Exception as exc:
         logger.warning(f"Gagal memanggil Keycloak UserInfo endpoint: {exc}")
         return {}
+
+# Hanya klaim NIP resmi (18 digit) yang diterima sebagai identitas. Klaim yang dapat diubah
+# pengguna seperti preferred_username tidak pernah dipakai sebagai NIP.
+NIP_CLAIMS = ("nip_baru", "nipbaru", "nip")
+NIP_PATTERN = re.compile(r"^\d{18}$")
+
+def _extract_nip(claims: Dict[str, Any]) -> Optional[str]:
+    for claim in NIP_CLAIMS:
+        value = str(claims.get(claim) or "").strip()
+        if NIP_PATTERN.match(value):
+            return value
+    return None
 
 async def authenticate_and_extract_identity(
     id_token: Optional[str] = None,
@@ -217,35 +237,21 @@ async def authenticate_and_extract_identity(
                     verified_claims[k] = v
 
     # 3. Ekstraksi NIP dari klaim terverifikasi
-    nip = (
-        verified_claims.get("nip_baru")
-        or verified_claims.get("nipbaru")
-        or verified_claims.get("niplama")
-        or verified_claims.get("nip")
-        or verified_claims.get("preferred_username")
-    )
+    nip_clean = _extract_nip(verified_claims)
 
     # 4. Fallback ke UserInfo endpoint jika NIP belum ditemukan dan access_token tersedia
-    if not nip and access_token:
+    if not nip_clean and access_token:
         userinfo = await fetch_keycloak_userinfo(access_token)
-        nip = (
-            userinfo.get("nip_baru")
-            or userinfo.get("nipbaru")
-            or userinfo.get("niplama")
-            or userinfo.get("nip")
-            or userinfo.get("preferred_username")
-        )
+        nip_clean = _extract_nip(userinfo)
         for k, v in userinfo.items():
             if k not in verified_claims and v:
                 verified_claims[k] = v
 
-    if not nip:
+    if not nip_clean:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Token Keycloak valid tetapi tidak memuat klaim NIP resmi pegawai BPS."
         )
-
-    nip_clean = str(nip).strip()
     nama = str(
         verified_claims.get("name")
         or verified_claims.get("preferred_username")

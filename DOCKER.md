@@ -18,16 +18,15 @@ flowchart TD
         DB[("Kontainer Database (halopay-db)<br/>PostgreSQL 16 Alpine • Port 5432")]
     end
 
-    Browser -->|Akses UI: http://server-ip:3005| Frontend
-    Browser -->|Akses API/Docs: http://server-ip:8005/docs| Backend
-    Frontend -->|Internal Proxy: http://backend:8000| Backend
+    Browser -->|HTTPS via Cloudflare Tunnel| Frontend
+        Frontend -->|Internal Proxy: http://backend:8000| Backend
     Backend -->|Koneksi asyncpg (Zero Leakage)| DB
 ```
 
 ### Pemetaan Port & Alur Komunikasi:
-* **Host Port `3005` (atau `3000`) $\rightarrow$ Kontainer Frontend:** Melayani tampilan antarmuka web Next.js.
-* **Host Port `8005` (atau `8000`) $\rightarrow$ Kontainer Backend:** Melayani endpoint REST API FastAPI dan dokumentasi Swagger UI.
-* **Host Port `5432` $\rightarrow$ Kontainer Database:** PostgreSQL Server lokal (skema `karyawan_bps`).
+* **Host Port `3005` $\rightarrow$ Kontainer Frontend:** Hanya terikat ke `127.0.0.1` (loopback). Akses publik melalui Cloudflare Tunnel (`cloudflared` di host, ingress `service: http://localhost:3005`); set `NEXT_PUBLIC_APP_URL` ke domain HTTPS publik.
+* **Host Port `8005` $\rightarrow$ Kontainer Backend:** Hanya terikat ke `127.0.0.1` (loopback). Swagger UI (jika `ENABLE_DOCS=true`) dapat dibuka dari server itu sendiri (`http://localhost:8005/docs`) atau via SSH tunnel; klien browser mengakses API melalui proxy frontend `/api/v1/*`.
+* **Host Port `5434` $\rightarrow$ Kontainer Database:** Hanya terikat ke `127.0.0.1` (loopback). Akses dari luar server gunakan SSH tunnel: `ssh -L 5434:127.0.0.1:5434 user@server-ip`.
 * **Komunikasi Antar-Kontainer:** Frontend meneruskan permintaan `/api/v1/*` ke backend secara internal melalui alamat `http://backend:8000`. Backend mengakses database melalui nama host DNS `db:5432`.
 * **Prinsip Keamanan:**
   * `JWT_SECRET` hanya dikelola dan didefinisikan pada backend & file `.env` root, **tidak pernah diletakkan di frontend**.
@@ -100,7 +99,7 @@ docker compose ps
 NAME                IMAGE                     COMMAND                  SERVICE    STATUS              PORTS
 halopay-db          postgres:16-alpine        "docker-entrypoint.s…"   db         running (healthy)   0.0.0.0:5432->5432/tcp
 halopay-backend     halopay-backend:latest    "uvicorn backend.app…"   backend    running (healthy)   0.0.0.0:8005->8000/tcp
-halopay-frontend    halopay-frontend:latest   "node server.js"         frontend   running             0.0.0.0:3005->3000/tcp
+halopay-frontend    halopay-frontend:latest   "node server.js"         frontend   running             127.0.0.1:3005->3000/tcp
 ```
 > Urutan peluncuran: `db` (healthy) $\rightarrow$ `backend` (healthy) $\rightarrow$ `frontend` (running).
 
@@ -150,7 +149,7 @@ docker network create halopay-network
 docker run -d \
   --name halopay-db \
   --network halopay-network \
-  -p 5432:5432 \
+  -p 127.0.0.1:5434:5432 \
   -e POSTGRES_USER=halopay_admin \
   -e POSTGRES_PASSWORD=your_secure_password \
   -e POSTGRES_DB=halopay_db \
@@ -172,7 +171,7 @@ docker run -d \
    docker run -d \
      --name halopay-backend \
      --network halopay-network \
-     -p 8005:8000 \
+     -p 127.0.0.1:8005:8000 \
      -e PROJECT_NAME="HaloPay BPS Jatim Backend" \
      -e API_V1_STR="/api/v1" \
      -e DATABASE_URL="postgresql://halopay_admin:your_secure_password@halopay-db:5432/halopay_db" \
@@ -202,7 +201,7 @@ docker run -d \
    docker run -d \
      --name halopay-frontend \
      --network halopay-network \
-     -p 3005:3000 \
+     -p 127.0.0.1:3005:3000 \
      -e PORT=3000 \
      -e HOSTNAME="0.0.0.0" \
      -e FASTAPI_INTERNAL_URL="http://halopay-backend:8000" \
@@ -228,17 +227,9 @@ Setelah kontainer aktif, buka peramban Anda untuk menguji endpoint:
    ```bash
    curl http://localhost:8005/api/health
    ```
-   **Respon yang Diharapkan:**
-   ```json
-   {
-     "status": "healthy",
-     "app": "HaloPay BPS Jatim Backend",
-     "uptime_seconds": 12.4,
-     "database": { "connected": true, "latency_ms": 15.2 }
-   }
-   ```
+   **Respon yang Diharapkan:** `{"status": "healthy"}` (HTTP 503 `{"status": "degraded"}` jika database tidak terhubung). Endpoint ini hanya untuk healthcheck internal dan tidak diteruskan oleh proxy frontend.
 2. **Dokumentasi API Interaktif (Swagger UI):**
-   Buka `http://localhost:8005/docs` untuk memeriksa seluruh rute endpoint API v1.
+   Nonaktif secara bawaan. Untuk pengembangan, tambahkan `ENABLE_DOCS: "true"` pada environment service `backend`, lalu buka `http://localhost:8005/docs` dari server itu sendiri.
 3. **Aplikasi Web Frontend:**
    Buka `http://localhost:3005` di browser:
    * Masuk melalui SSO Keycloak BPS.

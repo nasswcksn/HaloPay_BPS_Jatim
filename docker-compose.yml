@@ -3,15 +3,16 @@ services:
     container_name: halopay-db
     image: postgres:16-alpine
     restart: unless-stopped
+    # Hanya terbuka di loopback host; port Docker yang dipublikasikan melewati aturan firewall (ufw)
     ports:
-      - "${DB_PORT:-5434}:5432"
+      - "127.0.0.1:5434:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - halopay_pgdata:/var/lib/postgresql/data
-      - ./backend/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -28,8 +29,9 @@ services:
       dockerfile: Dockerfile
     image: halopay-backend:latest
     restart: unless-stopped
+    # Hanya terbuka di loopback host; klien mengakses API melalui proxy frontend (/api/v1/*)
     ports:
-      - "${BACKEND_PORT:-8005}:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8005}:8000"
     environment:
       PROJECT_NAME: "HaloPay BPS Jatim Backend"
       API_V1_STR: "/api/v1"
@@ -58,8 +60,9 @@ services:
       dockerfile: Dockerfile
     image: halopay-frontend:latest
     restart: unless-stopped
+    # Hanya terbuka di loopback host; akses publik melalui Cloudflare Tunnel (cloudflared -> http://localhost:3005)
     ports:
-      - "${FRONTEND_PORT:-3005}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3005}:3000"
     environment:
       PORT: 3000
       HOSTNAME: "0.0.0.0"

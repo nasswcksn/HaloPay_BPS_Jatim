@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from backend.app.core.security import require_admin
@@ -20,6 +21,8 @@ from backend.app.schemas.payroll import (
 )
 from backend.app.core.repository import PayrollRepository
 from backend.app.api.payroll import build_dashboard_bundle_data
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Administrator"])
 
@@ -332,10 +335,12 @@ async def sync_payroll_data_admin(
             "message": f"Berhasil menyinkronkan data periode {payload.periode}.",
             "counts": counts,
         }
-    except Exception as e:
+    except Exception:
+        # Detail teknis hanya dicatat di log server, tidak dikirim ke klien
+        logger.exception("Gagal menyinkronkan data payroll periode %s", payload.periode)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Gagal menyinkronkan data payroll: {str(e)}",
+            detail="Gagal menyinkronkan data payroll. Periksa format berkas lalu coba lagi.",
         )
 
 @router.put("/users/role")

@@ -1,7 +1,24 @@
 import pytest
+from unittest.mock import patch, AsyncMock
 from httpx import ASGITransport, AsyncClient
 from backend.app.main import app
 from backend.app.core.security import create_access_token
+
+# Akun pada tabel users yang dirujuk oleh token fixture (role dibaca dari sini, bukan dari token)
+FAKE_USERS = {
+    "196807031994011001": {"id": "user-karyawan-1", "nip": "196807031994011001", "role": "karyawan"},
+    "198503142009022003": {"id": "user-admin-1", "nip": "198503142009022003", "role": "admin"},
+}
+
+@pytest.fixture(autouse=True)
+def mock_users_table():
+    users = {nip: dict(row) for nip, row in FAKE_USERS.items()}  # salinan per test
+    with patch(
+        'backend.app.core.repository.PayrollRepository.get_user_by_nip',
+        new_callable=AsyncMock,
+    ) as mock_get_user:
+        mock_get_user.side_effect = lambda nip: users.get(nip)
+        yield users
 
 @pytest.fixture
 def regular_user_token():
@@ -56,6 +73,31 @@ async def test_rbc_forbidden_for_regular_user(regular_user_token):
         resp = await client.get("/api/v1/admin/employees", headers=headers)
         assert resp.status_code == 403
         assert "Akses ditolak" in resp.json()["detail"]
+
+@pytest.mark.anyio
+async def test_demoted_admin_token_rejected(admin_user_token, mock_users_table):
+    """
+    Token yang diterbitkan saat user masih admin DITOLAK (403) setelah role-nya diturunkan di database.
+    """
+    mock_users_table["198503142009022003"] = {**mock_users_table["198503142009022003"], "role": "karyawan"}
+    transport = ASGITransport(app=app)
+    headers = {"Authorization": f"Bearer {admin_user_token}"}
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/admin/employees", headers=headers)
+        assert resp.status_code == 403
+
+@pytest.mark.anyio
+async def test_token_for_unknown_or_recreated_user_rejected():
+    """
+    Token sah untuk NIP yang tidak ada di tabel users, atau dengan id akun lama, DITOLAK (401).
+    """
+    unknown = create_access_token({"id": "x", "nip": "999999999999999999", "role": "admin"})
+    stale_id = create_access_token({"id": "old-id", "nip": "198503142009022003", "role": "admin"})
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        for token in (unknown, stale_id):
+            resp = await client.get("/api/v1/admin/employees", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 401
 
 @pytest.mark.anyio
 async def test_zero_leakage_my_slip(regular_user_token):

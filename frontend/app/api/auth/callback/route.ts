@@ -3,7 +3,9 @@ import { exchangeCodeForTokens } from '@/utils/keycloak';
 import {
   SESSION_COOKIE_NAME,
   SESSION_DURATION_SECONDS,
+  isSecureCookie,
 } from '@/utils/auth';
+import { getAppUrl } from '@/utils/app-url';
 
 
 
@@ -14,19 +16,7 @@ export async function GET(request: NextRequest) {
   const error = url.searchParams.get('error');
   const errorDescription = url.searchParams.get('error_description');
 
-  let clientHost = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
-  if (clientHost.startsWith('0.0.0.0')) {
-    clientHost = clientHost.replace('0.0.0.0', 'localhost');
-  }
-  const forwardedProto = request.headers.get('x-forwarded-proto');
-  let envProto: string | null = null;
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    envProto = process.env.NEXT_PUBLIC_APP_URL.startsWith('https') ? 'https' : 'http';
-  }
-  const protocol = forwardedProto || envProto || (request.nextUrl.protocol ? request.nextUrl.protocol.replace(':', '') : 'http');
-  const isHttps = protocol === 'https';
-  const baseUrl = `${protocol}://${clientHost}`;
-  const dynamicRedirectUri = `${baseUrl}/api/auth/callback`;
+  const baseUrl = getAppUrl();
 
   const buildErrorRedirect = (msg: string) => {
     return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(msg)}`, baseUrl));
@@ -59,7 +49,6 @@ export async function GET(request: NextRequest) {
     const tokens = await exchangeCodeForTokens({
       code,
       codeVerifier,
-      customRedirectUri: dynamicRedirectUri,
     });
 
     if (tokens.error || !tokens.access_token) {
@@ -109,7 +98,7 @@ export async function GET(request: NextRequest) {
     // Simpan Cookie Sesi
     response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
       httpOnly: true,
-      secure: isHttps,
+      secure: isSecureCookie(),
       sameSite: 'lax',
       maxAge: SESSION_DURATION_SECONDS,
       path: '/',

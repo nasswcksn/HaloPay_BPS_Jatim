@@ -4,6 +4,7 @@ from fastapi import Request, HTTPException, status, Depends
 from jose import jwt, JWTError
 from backend.app.core.config import settings
 from backend.app.schemas.auth import UserSession
+from backend.app.core.repository import PayrollRepository
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """
@@ -65,13 +66,23 @@ async def get_current_user(request: Request) -> UserSession:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Klaim NIP tidak ditemukan pada tiket autentikasi.",
         )
-        
+
+    # Role & keberadaan akun selalu dibaca dari database, bukan dari klaim token, agar
+    # pencabutan role admin / penghapusan akun langsung berlaku tanpa menunggu token kedaluwarsa.
+    user_row = await PayrollRepository.get_user_by_nip(str(nip))
+    if not user_row or str(user_row.get("id")) != str(payload.get("id")):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Akun tidak ditemukan atau sesi tidak lagi berlaku. Silakan masuk kembali.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return UserSession(
         id=str(payload.get("id", nip)),
         nip=str(nip),
         nama_lengkap=str(payload.get("nama_lengkap", payload.get("name", "Pegawai BPS"))),
         username=str(payload.get("username", payload.get("username_slug", nip))),
-        role=payload.get("role", "karyawan"),
+        role=user_row.get("role", "karyawan"),
         email=payload.get("email"),
         jabatan=payload.get("jabatan"),
         satker=payload.get("satker", "3500"),

@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     
+    # Swagger UI / ReDoc / OpenAPI schema (nonaktif bawaan; aktifkan hanya untuk pengembangan)
+    ENABLE_DOCS: bool = False
+
     # CORS Origins
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 

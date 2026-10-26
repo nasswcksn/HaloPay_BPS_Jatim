@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+const API_PREFIX = '/api/v1/';
+
+// Hanya header ini yang diteruskan ke backend; header lain dari klien (X-Forwarded-*,
+// Expect, Content-Length, dsb.) dibuang agar tidak dapat dipalsukan atau merusak request.
+const FORWARDED_HEADERS = ['cookie', 'authorization', 'content-type', 'accept'];
+
 async function handleProxy(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -14,10 +20,19 @@ async function handleProxy(
     const search = req.nextUrl.search || '';
     const backendBase =
       process.env.FASTAPI_INTERNAL_URL || 'http://127.0.0.1:8000';
-    const targetUrl = `${backendBase}/api/v1/${pathSegment}${search}`;
+    const targetUrl = new URL(`${backendBase}${API_PREFIX}${pathSegment}${search}`);
 
-    const headers = new Headers(req.headers);
-    headers.delete('host');
+    // Segmen ter-encode seperti '..%2F..%2Fdocs' didekode menjadi '../../docs' dan dinormalisasi
+    // oleh URL parser; tolak setiap target yang keluar dari prefix /api/v1/.
+    if (!targetUrl.pathname.startsWith(API_PREFIX)) {
+      return NextResponse.json({ detail: 'Not Found' }, { status: 404 });
+    }
+
+    const headers = new Headers();
+    for (const name of FORWARDED_HEADERS) {
+      const value = req.headers.get(name);
+      if (value) headers.set(name, value);
+    }
 
     const body = ['GET', 'HEAD'].includes(req.method)
       ? undefined
@@ -42,10 +57,7 @@ async function handleProxy(
   } catch (error: any) {
     console.error('FastAPI proxy error:', error);
     return NextResponse.json(
-      {
-        error: 'Gagal menghubungkan ke backend FastAPI',
-        details: error?.message || String(error),
-      },
+      { error: 'Gagal menghubungkan ke backend FastAPI' },
       { status: 502 }
     );
   }

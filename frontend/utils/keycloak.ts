@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { getAppUrl } from '@/utils/app-url';
 
 export interface KeycloakUserInfo {
   nip_baru?: string;
@@ -32,7 +33,7 @@ export function getKeycloakConfig() {
   const baseUrl = (process.env.KEYCLOAK_URL || 'https://auth.majapah.it').replace(/\/+$/, '');
   const realm = process.env.KEYCLOAK_REALM || 'majapahit';
   const clientId = process.env.KEYCLOAK_CLIENT_ID || 'halopay';
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/+$/, '');
+  const appUrl = getAppUrl();
 
   return {
     baseUrl,
