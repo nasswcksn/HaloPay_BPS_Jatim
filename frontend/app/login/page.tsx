@@ -28,8 +28,17 @@ function LoginFormContent() {
         return 'Sesi verifikasi peramban tidak ditemukan. Silakan login kembali.';
       case 'token_exchange_failed':
         return 'Gagal menukarkan token dengan server Keycloak BPS.';
+      case 'nip_missing':
+        return 'Akun SSO Anda tidak memuat NIP resmi pegawai BPS. Hubungi administrator.';
+      case 'sync_failed':
+        return 'Gagal memvalidasi sesi SSO dengan server HaloPay. Silakan coba login kembali.';
+      case 'backend_unreachable':
+        return 'Server HaloPay sedang tidak dapat dihubungi. Silakan coba beberapa saat lagi.';
+      case 'init_failed':
+        return 'Gagal memulai proses login SSO. Silakan coba kembali.';
       default:
-        return decodeURIComponent(code);
+        // Teks dari URL tidak pernah ditampilkan apa adanya (mencegah pemalsuan pesan di halaman login)
+        return 'Terjadi kesalahan saat proses masuk. Silakan coba login kembali.';
     }
   };
 

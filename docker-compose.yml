@@ -60,9 +60,10 @@ services:
       dockerfile: Dockerfile
     image: halopay-frontend:latest
     restart: unless-stopped
-    # Hanya terbuka di loopback host; akses publik melalui Cloudflare Tunnel (cloudflared -> http://localhost:3005)
+    # Bawaan hanya loopback. Jika Cloudflare Tunnel berjalan di mesin lain, set FRONTEND_BIND_ADDR
+    # ke IP LAN host ini (mis. 10.35.0.98) — jangan 0.0.0.0. DB & backend tetap di loopback.
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3005}:3000"
+      - "${FRONTEND_BIND_ADDR:-127.0.0.1}:${FRONTEND_PORT:-3005}:3000"
     environment:
       PORT: 3000
       HOSTNAME: "0.0.0.0"

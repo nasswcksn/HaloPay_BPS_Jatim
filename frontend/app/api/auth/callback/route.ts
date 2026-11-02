@@ -18,30 +18,32 @@ export async function GET(request: NextRequest) {
 
   const baseUrl = getAppUrl();
 
-  const buildErrorRedirect = (msg: string) => {
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(msg)}`, baseUrl));
+  // Hanya kode error tetap yang dikirim ke halaman login (pesan dipetakan di sana), sehingga
+  // teks dari query string / Keycloak / backend tidak pernah ditampilkan apa adanya ke pengguna.
+  const buildErrorRedirect = (code: string) => {
+    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(code)}`, baseUrl));
   };
 
   // 1. Cek error dari Keycloak
   if (error) {
     console.error('Keycloak Auth Callback Error:', error, errorDescription);
-    return buildErrorRedirect(errorDescription || error || 'Autentikasi Keycloak dibatalkan atau ditolak.');
+    return buildErrorRedirect(error === 'access_denied' ? 'access_denied' : 'sso_error');
   }
 
   if (!code) {
-    return buildErrorRedirect('Kode otorisasi (code) tidak diterima dari Keycloak.');
+    return buildErrorRedirect('missing_code');
   }
 
   // 2. Validasi State CSRF
   const savedState = request.cookies.get('kc_auth_state')?.value;
   if (!state || state !== savedState) {
-    return buildErrorRedirect('Validasi keamanan gagal (state mismatch). Silakan coba login kembali.');
+    return buildErrorRedirect('invalid_state');
   }
 
   // 3. Ambil PKCE Verifier
   const codeVerifier = request.cookies.get('kc_pkce_verifier')?.value;
   if (!codeVerifier) {
-    return buildErrorRedirect('PKCE Verifier kedaluwarsa atau tidak ditemukan. Silakan login kembali.');
+    return buildErrorRedirect('missing_verifier');
   }
 
   try {
@@ -53,9 +55,7 @@ export async function GET(request: NextRequest) {
 
     if (tokens.error || !tokens.access_token) {
       console.error('Exchange Token Error:', tokens);
-      return buildErrorRedirect(
-        tokens.error_description || tokens.error || 'Gagal menukarkan kode token dengan Keycloak BPS.'
-      );
+      return buildErrorRedirect('token_exchange_failed');
     }
 
     // 5. Kirim Token Resmi Keycloak ke FastAPI Backend untuk Diverifikasi Kriptografis (RS256 JWKS)
@@ -79,16 +79,16 @@ export async function GET(request: NextRequest) {
       } else {
         const errJson = await syncRes.json().catch(() => ({}));
         console.error('Sync session error, status:', syncRes.status, errJson);
-        const errMsg = errJson.detail || 'Gagal memvalidasi token sesi SSO dengan backend.';
-        return buildErrorRedirect(errMsg);
+        // Backend mengembalikan 400 jika token valid tetapi tidak memuat klaim NIP resmi
+        return buildErrorRedirect(syncRes.status === 400 ? 'nip_missing' : 'sync_failed');
       }
     } catch (syncErr) {
       console.error('Failed to sync user session with backend:', syncErr);
-      return buildErrorRedirect('Gagal menghubungkan ke backend untuk inisialisasi sesi login.');
+      return buildErrorRedirect('backend_unreachable');
     }
 
     if (!sessionToken) {
-      return buildErrorRedirect('Token sesi tidak berhasil diterbitkan oleh backend.');
+      return buildErrorRedirect('sync_failed');
     }
 
 
@@ -111,6 +111,6 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (err: any) {
     console.error('Unhandled Keycloak Callback Exception:', err);
-    return buildErrorRedirect('Terjadi kesalahan internal saat memproses autentikasi SSO.');
+    return buildErrorRedirect('internal_error');
   }
 }
