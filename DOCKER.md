@@ -24,7 +24,10 @@ flowchart TD
 ```
 
 ### Pemetaan Port & Alur Komunikasi:
-* **Host Port `3005` $\rightarrow$ Kontainer Frontend:** Hanya terikat ke `127.0.0.1` (loopback). Akses publik melalui Cloudflare Tunnel (`cloudflared` di host, ingress `service: http://localhost:3005`); set `NEXT_PUBLIC_APP_URL` ke domain HTTPS publik.
+* **Host Port `3005` $\rightarrow$ Kontainer Frontend:** Bawaan terikat ke `127.0.0.1` (loopback). Akses publik melalui Cloudflare Tunnel:
+  * `cloudflared` di host yang sama: ingress `service: http://localhost:3005`.
+  * `cloudflared` di mesin lain (produksi saat ini): set `FRONTEND_BIND_ADDR` ke IP LAN server (mis. `10.35.0.98`, bukan `0.0.0.0`), ingress `service: http://10.35.0.98:3005`.
+  * Dalam kedua kasus, set `NEXT_PUBLIC_APP_URL` ke domain HTTPS publik (`https://halopay.cathajatim.id`), bukan IP LAN; jika tidak, pengguna dari domain publik akan di-redirect ke IP LAN.
 * **Host Port `8005` $\rightarrow$ Kontainer Backend:** Hanya terikat ke `127.0.0.1` (loopback). Swagger UI (jika `ENABLE_DOCS=true`) dapat dibuka dari server itu sendiri (`http://localhost:8005/docs`) atau via SSH tunnel; klien browser mengakses API melalui proxy frontend `/api/v1/*`.
 * **Host Port `5434` $\rightarrow$ Kontainer Database:** Hanya terikat ke `127.0.0.1` (loopback). Akses dari luar server gunakan SSH tunnel: `ssh -L 5434:127.0.0.1:5434 user@server-ip`.
 * **Komunikasi Antar-Kontainer:** Frontend meneruskan permintaan `/api/v1/*` ke backend secara internal melalui alamat `http://backend:8000`. Backend mengakses database melalui nama host DNS `db:5432`.
