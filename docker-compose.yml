@@ -12,7 +12,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - halopay_pgdata:/var/lib/postgresql/data
+      # Hanya dijalankan saat volume halopay_pgdata masih kosong, berurutan: skema lalu data awal.
+      # init-db.sql berisi data pribadi pegawai (termasuk akun admin): tidak di-commit (.gitignore),
+      # salin manual ke server dan beri chmod 644 sebelum start pertama.
       - ./backend/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./init-db.sql:/docker-entrypoint-initdb.d/02-init-data.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
